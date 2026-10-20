@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<title>REFORGE</title>
+<style>
+:root{--bg:#07090c;--pnl:#0f1319;--ln:#1d2632;--tx:#c8d4e0;--ac:#00e5a0;--wn:#ff6b4a}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+body{margin:0;background:var(--bg);color:var(--tx);font:13px/1.55 ui-monospace,Menlo,Consolas,monospace;padding:12px;max-width:760px;margin:0 auto}
+h1{font-size:15px;color:var(--ac);letter-spacing:3px;margin:0 0 12px}
+.pnl{background:var(--pnl);border:1px solid var(--ln);border-radius:10px;padding:12px;margin-bottom:10px}
+label{display:block;color:#6f8299;font-size:11px;text-transform:uppercase;letter-spacing:1px;margin:10px 0 4px}
+input,textarea{width:100%;background:#0a0e13;border:1px solid var(--ln);color:var(--tx);border-radius:7px;padding:10px;font:inherit;font-size:12px}
+textarea{min-height:80px}
+button{width:100%;background:var(--ac);color:#00110b;border:0;border-radius:8px;padding:12px;font:inherit;font-weight:700;letter-spacing:1px;margin-top:8px;cursor:pointer}
+button.alt{background:#1c2733;color:var(--tx)}
+button.dng{background:var(--wn);color:#1a0500}
+.row{display:flex;gap:8px}
+.row>*{flex:1}
+#log{background:#040608;border:1px solid var(--ln);border-radius:8px;padding:10px;height:200px;overflow:auto;font-size:11px;white-space:pre-wrap;color:#9fb0c2}
+#log .ok{color:var(--ac)} #log .er{color:var(--wn)} #log .in{color:#4a9eff}
+.hint{color:#55647a;font-size:11px;margin-top:6px}
+</style>
+</head>
+<body>
+
+<h1>REFORGE</h1>
+
+<div class="pnl">
+  <label>Target URL</label>
+  <input id="url" placeholder="https://example.com" inputmode="url">
+  <label>Or paste source HTML</label>
+  <textarea id="src" placeholder="paste source..."></textarea>
+  <button onclick="ripProxy()">RIP VIA SERVER</button>
+</div>
+
+<div class="pnl">
+  <label>Kill selectors (comma list)</label>
+  <input id="strip" value="paywall,login,subscribe,modal,ads,premium,pay,gate,overlay,regwall,upsell">
+  <div class="row">
+    <button class="alt" onclick="unlock()">UNLOCK</button>
+    <button class="alt" onclick="stripNodes()">STRIP</button>
+  </div>
+</div>
+
+<div class="pnl">
+  <label>Edits (one per line)</label>
+  <textarea id="edits" placeholder="change title to My App&#10;remove all text containing Premium&#10;delete element .ad-banner&#10;change color #ff0000 to #00e5a0"></textarea>
+  <button onclick="applyEdits()">APPLY EDITS</button>
+</div>
+
+<div class="pnl">
+  <div class="row">
+    <button onclick="runPreview()">PREVIEW</button>
+    <button onclick="download()">EXPORT</button>
+  </div>
+  <button class="dng" onclick="clearAll()">RESET</button>
+</div>
+
+<div class="pnl">
+  <div id="log"></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const L=(m,c='in')=>{const d=$('log');d.innerHTML+=`<span class="${c}">${m}</span>\n`;d.scrollTop=d.scrollHeight;};
+let doc='',base='';
+
+function ripProxy(){
+  const u=$('url').value.trim();
+  const s=$('src').value.trim();
+  if(s){doc=s;base=u||'about:blank';L('Loaded '+doc.length+' bytes from paste.','ok');return;}
+  if(!u){L('No URL or source.','er');return;}
+  base=u;L('Ripping via server...');
+  fetch('/api/rip',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({url:u})})
+    .then(r=>r.json())
+    .then(j=>{
+      if(!j.ok)return L('Rip failed: '+j.err,'er');
+      doc=j.html;L('Ripped '+doc.length+' bytes, stripped '+j.removed+' nodes.','ok');
+    })
+    .catch(e=>L('Error: '+e.message,'er'));
+}
+
+function unlock(){
+  if(!doc){L('Rip first.','er');return;}
+  const css='<style id="__u">'+
+    '*{filter:none!important;-webkit-filter:none!important;backdrop-filter:none!important}'+
+    '[class*="blur"],[class*="lock"],[class*="hidden"],[class*="gate"],[class*="paywall"],[class*="overlay"]{display:none!important}'+
+    'html,body{overflow:auto!important;position:static!important;height:auto!important}'+
+    '</style>';
+  if(!doc.includes('__u')) doc=doc.replace(/<\/head>/i,css+'</head>');
+  if(!doc.includes('__u')) doc=css+doc;
+  L('Layout unlocked.','ok');
+}
+
+function stripNodes(){
+  if(!doc){L('Rip first.','er');return;}
+  const keys=$('strip').value.split(',').map(x=>x.trim()).filter(Boolean);
+  const t=document.createElement('template');t.innerHTML=doc;
+  let n=0;
+  keys.forEach(k=>{
+    t.content.querySelectorAll(`[class*="${k}"],[id*="${k}"]`).forEach(el=>{el.remove();n++;});
+  });
+  doc=t.innerHTML;
+  L('Stripped '+n+' nodes.','ok');
+}
+
+function applyEdits(){
+  if(!doc){L('Rip first.','er');return;}
+  $('edits').value.split('\n').map(x=>x.trim()).filter(Boolean).forEach(line=>{
+    let m;
+    if((m=line.match(/^change (.+) to (.+)$/i))){doc=doc.split(m[1]).join(m[2]);L(`"${m[1]}" → "${m[2]}"`,'ok');}
+    else if((m=line.match(/^remove all text containing (.+)$/i))){doc=doc.split(m[1]).join('');L(`Removed "${m[1]}"`,'ok');}
+    else if((m=line.match(/^delete element (.+)$/i))){const t=document.createElement('template');t.innerHTML=doc;t.content.querySelectorAll(m[1]).forEach(x=>x.remove());doc=t.innerHTML;L(`Deleted ${m[1]}`,'ok');}
+    else if((m=line.match(/^change color (.+) to (.+)$/i))){doc=doc.split(m[1]).join(m[2]);L(`Color ${m[1]} → ${m[2]}`,'ok');}
+    else L('Ignored: '+line,'er');
+  });
+}
+
+function runPreview(){
+  if(!doc){L('Nothing.','er');return;}
+  const w=window.open('','_blank');w.document.open();w.document.write(doc);w.document.close();
+  L('Preview opened.','ok');
+}
+
+function download(){
+  if(!doc){L('Nothing.','er');return;}
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([doc],{type:'text/html'}));
+  a.download='reforge-rebuild.html';a.click();
+  L('Exported reforge-rebuild.html','ok');
+}
+
+function clearAll(){doc='';$('log').innerHTML='';L('Reset.','ok');}
+L('Ready. Paste URL and RIP.','ok');
+</script>
+</body>
+</html>
